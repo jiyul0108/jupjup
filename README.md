@@ -33,14 +33,14 @@ JupJup/
 └── backend/           # Spring Boot 프로젝트
     └── src/main/java/com/jupjup/Backend/
         ├── domain/
-        │   ├── user/          # 회원 엔티티
+        │   ├── user/          # 회원 엔티티 + 회원가입/로그인 API
         │   ├── product/       # 상품 엔티티 + 상태 Enum
         │   ├── chat/          # 채팅방 + 채팅 메시지 엔티티
         │   ├── wish/          # 찜 엔티티
         │   └── review/        # 리뷰 + 신고 엔티티
         └── global/
-            ├── config/        # Security, WebSocket 설정 (예정)
-            ├── jwt/           # JWT 필터, 유틸 (예정)
+            ├── config/        # Security 설정
+            ├── jwt/           # JWT 필터, 유틸
             └── exception/     # 공통 예외처리 (예정)
 ```
 
@@ -149,21 +149,136 @@ protected void onCreate() {
 
 ---
 
+### 6. JWT 인증 — JwtUtil
+
+```java
+public String generateToken(String email) {
+    return Jwts.builder()
+            .subject(email)
+            .issuedAt(new Date())
+            .expiration(new Date(System.currentTimeMillis() + expiration))
+            .signWith(secretKey)
+            .compact();
+}
+```
+
+- 로그인 성공 시 이메일을 담아 JWT 토큰을 생성
+- 토큰 유효시간은 `application.properties`의 `jwt.expiration`으로 관리 (기본 24시간)
+- `Keys.hmacShaKeyFor` — secret key를 HMAC-SHA 알고리즘으로 변환하여 서명에 사용
+
+---
+
+### 7. JWT 필터 — JwtFilter
+
+```java
+@Override
+protected void doFilterInternal(HttpServletRequest request,
+                                HttpServletResponse response,
+                                FilterChain filterChain) throws ServletException, IOException {
+    String token = resolveToken(request);
+
+    if (token != null && jwtUtil.validateToken(token)) {
+        String email = jwtUtil.getEmailFromToken(token);
+        UsernamePasswordAuthenticationToken authentication =
+                new UsernamePasswordAuthenticationToken(email, null, List.of());
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+    }
+
+    filterChain.doFilter(request, response);
+}
+```
+
+- 모든 요청마다 `Authorization: Bearer {토큰}` 헤더를 검사
+- 토큰이 유효하면 `SecurityContextHolder`에 인증 정보 저장 → Spring Security가 인증된 사용자로 인식
+
+---
+
+### 8. Security 설정 — SecurityConfig
+
+```java
+http
+    .csrf(AbstractHttpConfigurer::disable)
+    .sessionManagement(session ->
+            session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+    .authorizeHttpRequests(auth -> auth
+            .requestMatchers("/api/auth/**").permitAll()
+            .anyRequest().authenticated()
+    )
+    .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+```
+
+- `csrf disable` — REST API는 CSRF 보호가 불필요하여 비활성화
+- `STATELESS` — JWT 방식이므로 서버에 세션을 저장하지 않음
+- `/api/auth/**` — 회원가입, 로그인은 토큰 없이 접근 허용, 나머지는 토큰 필수
+
+---
+
+### 9. 비밀번호 암호화 — BCrypt
+
+```java
+// 회원가입 시 암호화
+password = passwordEncoder.encode(request.getPassword())
+
+// 로그인 시 검증
+passwordEncoder.matches(request.getPassword(), user.getPassword())
+```
+
+- 비밀번호를 BCrypt 알고리즘으로 암호화하여 DB에 저장 (평문 저장 금지)
+- `matches` — 입력한 비밀번호와 암호화된 비밀번호를 안전하게 비교
+
+---
+
+## 🔌 API 명세
+
+### 인증 API
+
+| Method | URL | 설명 | 인증 필요 |
+|--------|-----|------|----------|
+| POST | `/api/auth/signup` | 회원가입 | ❌ |
+| POST | `/api/auth/login` | 로그인 | ❌ |
+
+**회원가입 요청**
+```json
+{
+  "email": "test@test.com",
+  "password": "1234",
+  "nickname": "줍줍유저",
+  "location": "서울"
+}
+```
+
+**로그인 요청**
+```json
+{
+  "email": "test@test.com",
+  "password": "1234"
+}
+```
+
+**로그인 응답**
+```json
+{
+  "token": "eyJhbGciOiJIUzM4NCJ9...",
+  "email": "test@test.com",
+  "nickname": "줍줍유저"
+}
+```
+
+---
+
 ## 📅 개발 일정
 
-### ✅ 1주차 완료 (오늘)
+### ✅ 1주차 완료
 - [x] Spring Boot 프로젝트 세팅 (Gradle + Java 21)
 - [x] MySQL 연결 및 DB 생성
 - [x] JWT 의존성 추가 (jjwt 0.12.6)
 - [x] 패키지 구조 설계
 - [x] 7개 엔티티 설계 및 테이블 자동 생성 확인
 - [x] GitHub 레포지토리 연동
-
-### 🔜 1주차 남은 작업
-- [ ] 회원가입 API (`POST /api/auth/signup`)
-- [ ] 로그인 API (`POST /api/auth/login`)
-- [ ] JWT 토큰 발급 및 검증 (`JwtUtil`, `JwtFilter`)
-- [ ] Spring Security 설정 (`SecurityConfig`)
+- [x] 회원가입 API (`POST /api/auth/signup`)
+- [x] 로그인 API (`POST /api/auth/login`)
+- [x] JWT 토큰 발급 및 검증 (`JwtUtil`, `JwtFilter`)
+- [x] Spring Security 설정 (`SecurityConfig`)
 
 ### 📋 2주차
 - [ ] 상품 CRUD API
