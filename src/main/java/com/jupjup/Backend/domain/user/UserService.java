@@ -1,5 +1,8 @@
 package com.jupjup.Backend.domain.user;
 
+import com.jupjup.Backend.domain.user.dto.AuthResponse;
+import com.jupjup.Backend.domain.user.dto.LoginRequest;
+import com.jupjup.Backend.domain.user.dto.SignupRequest;
 import com.jupjup.Backend.global.jwt.JwtUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;

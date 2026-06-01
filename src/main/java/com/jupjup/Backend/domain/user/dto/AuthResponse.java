@@ -1,4 +1,4 @@
-package com.jupjup.Backend.domain.user;
+package com.jupjup.Backend.domain.user.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

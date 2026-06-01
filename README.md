@@ -34,12 +34,12 @@ JupJup/
     └── src/main/java/com/jupjup/Backend/
         ├── domain/
         │   ├── user/          # 회원 엔티티 + 회원가입/로그인 API
-        │   ├── product/       # 상품 엔티티 + 상태 Enum
+        │   ├── product/       # 상품 엔티티 + CRUD + 이미지 업로드 + 상태 관리
         │   ├── chat/          # 채팅방 + 채팅 메시지 엔티티
         │   ├── wish/          # 찜 엔티티
         │   └── review/        # 리뷰 + 신고 엔티티
         └── global/
-            ├── config/        # Security 설정
+            ├── config/        # Security 설정, WebMvc 설정
             ├── jwt/           # JWT 필터, 유틸
             └── exception/     # 공통 예외처리 (예정)
 ```
@@ -48,12 +48,13 @@ JupJup/
 
 ## 🗄 데이터베이스 ERD
 
-총 7개 테이블로 구성됩니다.
+총 8개 테이블로 구성됩니다.
 
 | 테이블 | 설명 |
 |--------|------|
 | `users` | 회원 정보 (이메일, 비밀번호, 닉네임, 위치, 줍줍 점수) |
 | `products` | 상품 정보 (제목, 설명, 가격, 카테고리, 거래 상태) |
+| `product_images` | 상품 이미지 (상품 1개 : 이미지 N개) |
 | `chat_rooms` | 채팅방 (상품, 구매자, 판매자 연결) |
 | `chat_messages` | 채팅 메시지 (채팅방, 발신자, 내용) |
 | `wishes` | 찜 목록 (회원 ↔ 상품) |
@@ -202,6 +203,8 @@ http
             session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
     .authorizeHttpRequests(auth -> auth
             .requestMatchers("/api/auth/**").permitAll()
+            .requestMatchers("/error").permitAll()
+            .requestMatchers("/uploads/**").permitAll()
             .anyRequest().authenticated()
     )
     .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
@@ -210,6 +213,7 @@ http
 - `csrf disable` — REST API는 CSRF 보호가 불필요하여 비활성화
 - `STATELESS` — JWT 방식이므로 서버에 세션을 저장하지 않음
 - `/api/auth/**` — 회원가입, 로그인은 토큰 없이 접근 허용, 나머지는 토큰 필수
+- `/uploads/**` — 업로드된 이미지 파일 접근 허용
 
 ---
 
@@ -225,6 +229,72 @@ passwordEncoder.matches(request.getPassword(), user.getPassword())
 
 - 비밀번호를 BCrypt 알고리즘으로 암호화하여 DB에 저장 (평문 저장 금지)
 - `matches` — 입력한 비밀번호와 암호화된 비밀번호를 안전하게 비교
+
+---
+
+### 10. 상품 검색 필터 — @Query 동적 쿼리
+
+```java
+@Query(value = "SELECT p FROM Product p LEFT JOIN FETCH p.images WHERE " +
+        "(:category IS NULL OR p.category = :category) AND " +
+        "(:minPrice IS NULL OR p.price >= :minPrice) AND " +
+        "(:maxPrice IS NULL OR p.price <= :maxPrice)",
+        countQuery = "SELECT COUNT(p) FROM Product p WHERE " +
+        "(:category IS NULL OR p.category = :category) AND " +
+        "(:minPrice IS NULL OR p.price >= :minPrice) AND " +
+        "(:maxPrice IS NULL OR p.price <= :maxPrice)")
+Page<Product> search(
+        @Param("category") String category,
+        @Param("minPrice") Integer minPrice,
+        @Param("maxPrice") Integer maxPrice,
+        Pageable pageable
+);
+```
+
+- 카테고리, 최소 가격, 최대 가격을 선택적으로 필터링
+- 파라미터가 `null`이면 해당 조건을 무시 → 전체 조회와 동일하게 동작
+- `LEFT JOIN FETCH p.images` — 이미지 목록을 한 번에 조회 (N+1 문제 방지)
+- `countQuery` 분리 — `JOIN FETCH`와 `Page`를 함께 쓸 때 전체 데이터를 메모리에 올리는 문제 방지
+- `Pageable` — 페이지 번호, 페이지 크기, 정렬 기준을 쿼리 파라미터로 전달 가능
+
+---
+
+### 11. 이미지 업로드 — MultipartFile + 로컬 저장
+
+```java
+String absoluteUploadDir = System.getProperty("user.dir") + "/" + uploadDir;
+File dir = new File(absoluteUploadDir);
+if (!dir.exists()) {
+    dir.mkdirs();
+}
+
+String fileName = UUID.randomUUID() + "_" + file.getOriginalFilename();
+File dest = new File(absoluteUploadDir + "/" + fileName);
+file.transferTo(dest);
+```
+
+- `MultipartFile` — 이미지 파일을 multipart/form-data 형식으로 수신
+- `UUID` — 파일명 중복 방지를 위해 랜덤 UUID를 파일명 앞에 붙임
+- `System.getProperty("user.dir")` — 프로젝트 루트 기준 절대 경로로 저장
+- 저장된 이미지는 `/uploads/{파일명}` URL로 접근 가능
+
+---
+
+### 12. 거래 상태 변경 — PATCH API
+
+```java
+@PatchMapping("/{id}/status")
+public ResponseEntity<ProductResponse> updateStatus(
+        @PathVariable Long id,
+        @RequestParam ProductStatus status,
+        @AuthenticationPrincipal String email) {
+    return ResponseEntity.ok(productService.updateStatus(id, status, email));
+}
+```
+
+- `PATCH` — 리소스의 일부(상태)만 변경하는 HTTP 메서드
+- 본인 상품만 상태 변경 가능 (다른 사람 상품 변경 시 예외 발생)
+- `SELLING` → `RESERVED` → `SOLD` 순으로 상태 전환
 
 ---
 
@@ -247,14 +317,6 @@ passwordEncoder.matches(request.getPassword(), user.getPassword())
 }
 ```
 
-**로그인 요청**
-```json
-{
-  "email": "test@test.com",
-  "password": "1234"
-}
-```
-
 **로그인 응답**
 ```json
 {
@@ -262,6 +324,58 @@ passwordEncoder.matches(request.getPassword(), user.getPassword())
   "email": "test@test.com",
   "nickname": "줍줍유저"
 }
+```
+
+---
+
+### 상품 API
+
+| Method | URL | 설명 | 인증 필요 |
+|--------|-----|------|----------|
+| POST | `/api/products` | 상품 등록 (이미지 포함) | ✅ |
+| GET | `/api/products` | 상품 목록 조회 (필터 검색) | ✅ |
+| GET | `/api/products/{id}` | 상품 상세 조회 | ✅ |
+| PUT | `/api/products/{id}` | 상품 수정 | ✅ |
+| DELETE | `/api/products/{id}` | 상품 삭제 | ✅ |
+| PATCH | `/api/products/{id}/status` | 거래 상태 변경 | ✅ |
+
+**상품 등록 요청 (multipart/form-data)**
+
+| Key | Type | 설명 |
+|-----|------|------|
+| data | Text (application/json) | `{"title":"아이폰 14","price":900000,"category":"디지털/가전","location":"서울"}` |
+| images | File | 이미지 파일 (선택) |
+
+**상품 목록 조회 쿼리 파라미터**
+
+| 파라미터 | 타입 | 설명 |
+|---------|------|------|
+| category | String | 카테고리 필터 (선택) |
+| minPrice | Integer | 최소 가격 (선택) |
+| maxPrice | Integer | 최대 가격 (선택) |
+| sort | String | 정렬 기준 (기본: 최신순) |
+
+**상품 조회 응답**
+```json
+{
+  "id": 9,
+  "title": "아이폰 14",
+  "price": 900000,
+  "category": "디지털/가전",
+  "location": "서울",
+  "status": "SELLING",
+  "viewCount": 0,
+  "sellerNickname": "줍줍유저",
+  "createdAt": "2026-06-01T14:08:42.192075",
+  "imageUrls": [
+    "/uploads/3cc0b3d6-5c89-421b-807b-c09afc00f1df_하이미야.png"
+  ]
+}
+```
+
+**거래 상태 변경 요청**
+```
+PATCH /api/products/9/status?status=RESERVED
 ```
 
 ---
@@ -280,11 +394,14 @@ passwordEncoder.matches(request.getPassword(), user.getPassword())
 - [x] JWT 토큰 발급 및 검증 (`JwtUtil`, `JwtFilter`)
 - [x] Spring Security 설정 (`SecurityConfig`)
 
-### 📋 2주차
-- [ ] 상품 CRUD API
-- [ ] 카테고리 / 가격 필터 검색
-- [ ] 이미지 업로드
-- [ ] 거래 상태 변경 API
+### ✅ 2주차 완료
+- [x] 상품 CRUD API (등록/조회/수정/삭제)
+- [x] 유효성 검사 (`@Valid` — 필수 필드 누락 시 400 에러)
+- [x] 카테고리 / 가격 필터 검색 (`@Query` 동적 쿼리)
+- [x] 페이지네이션 (`Pageable` — 기본 20개, 최신순 정렬)
+- [x] 이미지 업로드 (`MultipartFile` — 로컬 저장, UUID 파일명)
+- [x] 거래 상태 변경 API (`PATCH /api/products/{id}/status`)
+- [x] DTO 패키지 구조 정리 (`domain/user/dto`, `domain/product/dto`)
 
 ### 📋 3주차
 - [ ] WebSocket 채팅 구현
@@ -322,12 +439,15 @@ spring.datasource.username=root
 spring.datasource.password=비밀번호입력
 spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
 
-spring.jpa.hibernate.ddl-auto=create
+spring.jpa.hibernate.ddl-auto=update
 spring.jpa.show-sql=true
 spring.jpa.properties.hibernate.format_sql=true
 
-jwt.secret=jupjup-secret-key-please-change-this-in-production
+jwt.secret=jupjup-secret-key-please-change-this-in-production-very-long-key
 jwt.expiration=86400000
+
+# 이미지 업로드
+file.upload-dir=uploads
 ```
 
 ### 서버 실행

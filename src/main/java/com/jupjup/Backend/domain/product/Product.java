@@ -4,6 +4,8 @@ import com.jupjup.Backend.domain.user.User;
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "products")
@@ -50,4 +52,19 @@ public class Product {
     protected void onCreate() {
         this.createdAt = LocalDateTime.now();
     }
+    public void update(String title, String description, int price, String category, String location) {
+        this.title = title;
+        this.description = description;
+        this.price = price;
+        this.category = category;
+        this.location = location;
+    }
+
+    public void updateStatus(ProductStatus status) {
+        this.status = status;
+    }
+
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
+    @Builder.Default
+    private List<ProductImage> images = new ArrayList<>();
 }
