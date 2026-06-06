@@ -17,6 +17,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.util.List;
 import com.jupjup.Backend.domain.product.ProductStatus;
+import com.jupjup.Backend.domain.product.dto.ProductUpdateStatusRequest;
 
 @RestController
 @RequestMapping("/api/products")
@@ -71,9 +72,9 @@ public class ProductController {
     @PatchMapping("/{id}/status")
     public ResponseEntity<ProductResponse> updateStatus(
             @PathVariable Long id,
-            @RequestParam ProductStatus status,
+            @RequestBody ProductUpdateStatusRequest request,
             @AuthenticationPrincipal String email) {
-        return ResponseEntity.ok(productService.updateStatus(id, status, email));
+        return ResponseEntity.ok(productService.updateStatus(id, request.getStatus(), email));
     }
 
 

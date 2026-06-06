@@ -40,4 +40,8 @@ public class User {
     protected void onCreate() {
         this.createdAt = LocalDateTime.now();
     }
+
+    public void updateJupjupScore(int delta) {
+        this.jupjupScore += delta;
+    }
 }

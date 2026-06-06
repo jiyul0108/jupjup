@@ -20,7 +20,7 @@
 | Build | Gradle |
 | Security | Spring Security + JWT (jjwt 0.12.6) |
 | Database | MySQL 8.x + Spring Data JPA (Hibernate 7) |
-| 실시간 채팅 | WebSocket (STOMP) |
+| 실시간 채팅 | WebSocket (STOMP + SockJS) |
 | Frontend | React 18 (예정) |
 
 ---
@@ -35,12 +35,12 @@ JupJup/
         ├── domain/
         │   ├── user/          # 회원 엔티티 + 회원가입/로그인 API
         │   ├── product/       # 상품 엔티티 + CRUD + 이미지 업로드 + 상태 관리
-        │   ├── chat/          # 채팅방 + 채팅 메시지 엔티티
-        │   ├── wish/          # 찜 엔티티
-        │   └── review/        # 리뷰 + 신고 엔티티
+        │   ├── chat/          # 채팅방 + 채팅 메시지 엔티티 + WebSocket 채팅
+        │   ├── wish/          # 찜 엔티티 + 찜하기 API
+        │   └── review/        # 리뷰 + 신고 엔티티 + API
         └── global/
-            ├── config/        # Security 설정, WebMvc 설정
-            ├── jwt/           # JWT 필터, 유틸
+            ├── config/        # Security 설정, WebMvc 설정, WebSocket 설정
+            ├── jwt/           # JWT 필터, 유틸, WebSocket 핸드셰이크 인터셉터
             └── exception/     # 공통 예외처리 (예정)
 ```
 
@@ -91,10 +91,20 @@ public class User {
 ```java
 @Column(nullable = false)
 private int jupjupScore = 0;
+
+public void updateJupjupScore(int delta) {
+    this.jupjupScore += delta;
+}
 ```
 
 - 당근마켓의 "매너온도(36.5°)"를 그대로 따라가지 않고 **줍줍 점수(0점 시작)** 로 차별화
-- 거래가 쌓일수록 점수가 올라가는 방식으로 설계 예정
+- 리뷰 점수에 따라 자동으로 증감
+
+| 리뷰 점수 | 줍줍 점수 변화 |
+|-----------|---------------|
+| 4 ~ 5점 | +1 |
+| 3점 | 변동 없음 |
+| 1 ~ 2점 | -1 |
 
 ---
 
@@ -205,6 +215,7 @@ http
             .requestMatchers("/api/auth/**").permitAll()
             .requestMatchers("/error").permitAll()
             .requestMatchers("/uploads/**").permitAll()
+            .requestMatchers("/ws/**").permitAll()
             .anyRequest().authenticated()
     )
     .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
@@ -212,8 +223,8 @@ http
 
 - `csrf disable` — REST API는 CSRF 보호가 불필요하여 비활성화
 - `STATELESS` — JWT 방식이므로 서버에 세션을 저장하지 않음
-- `/api/auth/**` — 회원가입, 로그인은 토큰 없이 접근 허용, 나머지는 토큰 필수
-- `/uploads/**` — 업로드된 이미지 파일 접근 허용
+- `/api/auth/**` — 회원가입, 로그인은 토큰 없이 접근 허용
+- `/ws/**` — WebSocket 연결 엔드포인트 접근 허용
 
 ---
 
@@ -243,58 +254,84 @@ passwordEncoder.matches(request.getPassword(), user.getPassword())
         "(:category IS NULL OR p.category = :category) AND " +
         "(:minPrice IS NULL OR p.price >= :minPrice) AND " +
         "(:maxPrice IS NULL OR p.price <= :maxPrice)")
-Page<Product> search(
-        @Param("category") String category,
-        @Param("minPrice") Integer minPrice,
-        @Param("maxPrice") Integer maxPrice,
-        Pageable pageable
-);
+Page<Product> search(...);
 ```
 
 - 카테고리, 최소 가격, 최대 가격을 선택적으로 필터링
-- 파라미터가 `null`이면 해당 조건을 무시 → 전체 조회와 동일하게 동작
-- `LEFT JOIN FETCH p.images` — 이미지 목록을 한 번에 조회 (N+1 문제 방지)
 - `countQuery` 분리 — `JOIN FETCH`와 `Page`를 함께 쓸 때 전체 데이터를 메모리에 올리는 문제 방지
-- `Pageable` — 페이지 번호, 페이지 크기, 정렬 기준을 쿼리 파라미터로 전달 가능
 
 ---
 
 ### 11. 이미지 업로드 — MultipartFile + 로컬 저장
 
 ```java
-String absoluteUploadDir = System.getProperty("user.dir") + "/" + uploadDir;
-File dir = new File(absoluteUploadDir);
-if (!dir.exists()) {
-    dir.mkdirs();
-}
-
 String fileName = UUID.randomUUID() + "_" + file.getOriginalFilename();
 File dest = new File(absoluteUploadDir + "/" + fileName);
 file.transferTo(dest);
 ```
 
-- `MultipartFile` — 이미지 파일을 multipart/form-data 형식으로 수신
 - `UUID` — 파일명 중복 방지를 위해 랜덤 UUID를 파일명 앞에 붙임
-- `System.getProperty("user.dir")` — 프로젝트 루트 기준 절대 경로로 저장
 - 저장된 이미지는 `/uploads/{파일명}` URL로 접근 가능
 
 ---
 
-### 12. 거래 상태 변경 — PATCH API
+### 12. WebSocket 채팅 — STOMP + SockJS
 
 ```java
-@PatchMapping("/{id}/status")
-public ResponseEntity<ProductResponse> updateStatus(
-        @PathVariable Long id,
-        @RequestParam ProductStatus status,
-        @AuthenticationPrincipal String email) {
-    return ResponseEntity.ok(productService.updateStatus(id, status, email));
+@Configuration
+@EnableWebSocketMessageBroker
+public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
+
+    @Override
+    public void configureMessageBroker(MessageBrokerRegistry registry) {
+        registry.enableSimpleBroker("/sub");
+        registry.setApplicationDestinationPrefixes("/pub");
+    }
+
+    @Override
+    public void registerStompEndpoints(StompEndpointRegistry registry) {
+        registry.addEndpoint("/ws")
+                .addInterceptors(jwtHandshakeInterceptor)
+                .setAllowedOriginPatterns("*")
+                .withSockJS();
+    }
 }
 ```
 
-- `PATCH` — 리소스의 일부(상태)만 변경하는 HTTP 메서드
-- 본인 상품만 상태 변경 가능 (다른 사람 상품 변경 시 예외 발생)
-- `SELLING` → `RESERVED` → `SOLD` 순으로 상태 전환
+- `/sub` — 클라이언트가 메시지를 구독하는 prefix
+- `/pub` — 클라이언트가 메시지를 발행하는 prefix
+- WebSocket 연결 시 `?token={JWT}` 쿼리 파라미터로 인증
+
+```java
+// 메시지 발행 흐름
+// 클라이언트 → /pub/chat/{roomId} → 서버 저장 → /sub/chat/{roomId} → 구독 클라이언트
+@MessageMapping("/chat/{roomId}")
+public void sendMessage(@DestinationVariable Long roomId,
+                        @Payload ChatMessageRequest request,
+                        SimpMessageHeaderAccessor headerAccessor) {
+    String email = (String) headerAccessor.getSessionAttributes().get("email");
+    ChatMessageResponse response = chatService.saveMessage(roomId, request, email);
+    messagingTemplate.convertAndSend("/sub/chat/" + roomId, response);
+}
+```
+
+---
+
+### 13. 찜하기 — 토글 방식
+
+```java
+Optional<Wish> existing = wishRepository.findByUserIdAndProductId(user.getId(), productId);
+
+if (existing.isPresent()) {
+    wishRepository.delete(existing.get());
+    return "찜이 취소되었습니다.";
+} else {
+    wishRepository.save(Wish.builder().user(user).product(product).build());
+    return "찜이 추가되었습니다.";
+}
+```
+
+- 같은 상품을 이미 찜한 경우 취소, 아닌 경우 추가하는 토글 방식
 
 ---
 
@@ -346,36 +383,74 @@ public ResponseEntity<ProductResponse> updateStatus(
 | data | Text (application/json) | `{"title":"아이폰 14","price":900000,"category":"디지털/가전","location":"서울"}` |
 | images | File | 이미지 파일 (선택) |
 
-**상품 목록 조회 쿼리 파라미터**
+**거래 상태 변경 요청**
+```json
+PATCH /api/products/1/status
+{ "status": "SOLD" }
+```
 
-| 파라미터 | 타입 | 설명 |
-|---------|------|------|
-| category | String | 카테고리 필터 (선택) |
-| minPrice | Integer | 최소 가격 (선택) |
-| maxPrice | Integer | 최대 가격 (선택) |
-| sort | String | 정렬 기준 (기본: 최신순) |
+---
 
-**상품 조회 응답**
+### 채팅 API
+
+| Method | URL | 설명 | 인증 필요 |
+|--------|-----|------|----------|
+| POST | `/api/chat/rooms` | 채팅방 생성 (중복 시 기존 방 반환) | ✅ |
+| GET | `/api/chat/rooms` | 내 채팅방 목록 조회 | ✅ |
+| GET | `/api/chat/rooms/{roomId}/messages` | 이전 메시지 조회 | ✅ |
+| STOMP | `/pub/chat/{roomId}` | 실시간 메시지 전송 | ✅ (쿼리 파라미터 token) |
+
+**WebSocket 연결**
+```
+ws://localhost:8080/ws?token={JWT토큰}
+```
+
+**구독**
+```
+/sub/chat/{roomId}
+```
+
+---
+
+### 찜 API
+
+| Method | URL | 설명 | 인증 필요 |
+|--------|-----|------|----------|
+| POST | `/api/wishes/{productId}` | 찜 추가/취소 토글 | ✅ |
+| GET | `/api/wishes` | 내 찜 목록 조회 | ✅ |
+
+---
+
+### 리뷰 API
+
+| Method | URL | 설명 | 인증 필요 |
+|--------|-----|------|----------|
+| POST | `/api/reviews` | 리뷰 작성 | ✅ |
+| GET | `/api/reviews/users/{userId}` | 특정 유저의 받은 리뷰 목록 | ✅ |
+
+**리뷰 작성 요청**
 ```json
 {
-  "id": 9,
-  "title": "아이폰 14",
-  "price": 900000,
-  "category": "디지털/가전",
-  "location": "서울",
-  "status": "SELLING",
-  "viewCount": 0,
-  "sellerNickname": "줍줍유저",
-  "createdAt": "2026-06-01T14:08:42.192075",
-  "imageUrls": [
-    "/uploads/3cc0b3d6-5c89-421b-807b-c09afc00f1df_하이미야.png"
-  ]
+  "productId": 1,
+  "content": "친절하고 좋았어요!",
+  "score": 5
 }
 ```
 
-**거래 상태 변경 요청**
-```
-PATCH /api/products/9/status?status=RESERVED
+---
+
+### 신고 API
+
+| Method | URL | 설명 | 인증 필요 |
+|--------|-----|------|----------|
+| POST | `/api/reports` | 상품 신고 | ✅ |
+
+**신고 요청**
+```json
+{
+  "productId": 1,
+  "reason": "사기 의심 게시물입니다."
+}
 ```
 
 ---
@@ -403,15 +478,22 @@ PATCH /api/products/9/status?status=RESERVED
 - [x] 거래 상태 변경 API (`PATCH /api/products/{id}/status`)
 - [x] DTO 패키지 구조 정리 (`domain/user/dto`, `domain/product/dto`)
 
-### 📋 3주차
-- [ ] WebSocket 채팅 구현
-- [ ] 찜하기 기능
-- [ ] 리뷰 작성 및 줍줍 점수 반영
-- [ ] 신고 기능
+### ✅ 3주차 완료
+- [x] WebSocket 설정 (`WebSocketConfig`, `JwtHandshakeInterceptor`)
+- [x] 채팅방 생성/조회 REST API
+- [x] 실시간 메시지 전송 (STOMP)
+- [x] 이전 메시지 조회 API
+- [x] 찜하기 토글 API
+- [x] 내 찜 목록 조회 API
+- [x] 리뷰 작성 API (거래완료 상품만, 중복 방지)
+- [x] 줍줍 점수 자동 반영
+- [x] 신고 API (중복 신고 방지)
+- [x] 거래 상태 변경 `@RequestBody` 방식으로 개선
+- [x] `spring.jpa.open-in-view=false` 설정
 
 ### 📋 4주차
 - [ ] React 프론트엔드 연동
-- [ ] 예외 처리 고도화
+- [ ] 예외 처리 통일 (`@RestControllerAdvice`)
 - [ ] 테스트 및 디버깅
 - [ ] README 최종 정리
 
@@ -442,11 +524,11 @@ spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
 spring.jpa.hibernate.ddl-auto=update
 spring.jpa.show-sql=true
 spring.jpa.properties.hibernate.format_sql=true
+spring.jpa.open-in-view=false
 
 jwt.secret=jupjup-secret-key-please-change-this-in-production-very-long-key
 jwt.expiration=86400000
 
-# 이미지 업로드
 file.upload-dir=uploads
 ```
 
