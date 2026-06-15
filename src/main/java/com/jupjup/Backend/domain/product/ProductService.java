@@ -5,15 +5,22 @@ import com.jupjup.Backend.domain.product.dto.ProductResponse;
 import com.jupjup.Backend.domain.product.dto.ProductUpdateRequest;
 import com.jupjup.Backend.domain.user.User;
 import com.jupjup.Backend.domain.user.UserRepository;
+import com.jupjup.Backend.global.exception.BusinessException;
+import com.jupjup.Backend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
-import org.springframework.web.multipart.MultipartFile;
-import java.io.IOException;
-import java.util.List;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.List;
+
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -22,12 +29,17 @@ public class ProductService {
     private final ProductRepository productRepository;
     private final UserRepository userRepository;
     private final ImageService imageService;
+    private final com.jupjup.Backend.domain.chat.ChatRoomRepository chatRoomRepository;
+    private final com.jupjup.Backend.domain.chat.ChatMessageRepository chatMessageRepository;
+    private final com.jupjup.Backend.domain.order.OrderRepository orderRepository;
+    private final com.jupjup.Backend.domain.wish.WishRepository wishRepository;
+    private final com.jupjup.Backend.domain.review.ReportRepository reportRepository;
+    private final com.jupjup.Backend.domain.review.ReviewRepository reviewRepository;
 
-    // 상품 등록
     @Transactional
     public ProductResponse create(ProductCreateRequest request, List<MultipartFile> images, String email) throws IOException {
         User seller = userRepository.findByEmail(email)
-                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
         Product product = Product.builder()
                 .seller(seller)
@@ -48,67 +60,98 @@ public class ProductService {
         return new ProductResponse(
                 product.getId(),
                 product.getTitle(),
+                product.getDescription(),
                 product.getPrice(),
                 product.getCategory(),
                 product.getLocation(),
                 product.getStatus().name(),
                 product.getViewCount(),
                 product.getSeller().getNickname(),
+                product.getSeller().getJupjupScore(),
                 product.getCreatedAt(),
                 imageUrls
         );
     }
 
-    // 상품 목록 조회 (필터 검색)
-    public Page<ProductResponse> getList(String category, Integer minPrice, Integer maxPrice, Pageable pageable) {
-        return productRepository.search(category, minPrice, maxPrice, pageable)
+    public Page<ProductResponse> getList(String keyword, List<String> categories, Integer minPrice, Integer maxPrice, ProductStatus status, Pageable pageable) {
+        List<String> cats = (categories == null || categories.isEmpty()) ? null : categories;
+        return productRepository.search(keyword, cats, minPrice, maxPrice, status, pageable)
                 .map(ProductResponse::from);
     }
 
-    // 상품 상세 조회
+    @Transactional
     public ProductResponse getDetail(Long id) {
         Product product = productRepository.findByIdWithImages(id)
-                .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
+                .orElseThrow(() -> new BusinessException(ErrorCode.PRODUCT_NOT_FOUND));
+        product.increaseViewCount();
         return ProductResponse.from(product);
     }
 
-    // 상품 수정
     public ProductResponse update(Long id, ProductUpdateRequest request, String email) {
-        Product product = productRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
+        Product product = productRepository.findByIdWithSeller(id)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PRODUCT_NOT_FOUND));
 
         if (!product.getSeller().getEmail().equals(email)) {
-            throw new IllegalArgumentException("본인 상품만 수정할 수 있습니다.");
+            throw new BusinessException(ErrorCode.PRODUCT_NOT_OWNER);
         }
 
         product.update(request.getTitle(), request.getDescription(),
                 request.getPrice(), request.getCategory(), request.getLocation());
 
-        return ProductResponse.from(productRepository.save(product));
+        productRepository.save(product);
+
+        return productRepository.findByIdWithImages(id)
+                .map(ProductResponse::from)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PRODUCT_NOT_FOUND));
     }
 
-    // 상품 삭제
+    @Transactional
     public void delete(Long id, String email) {
-        Product product = productRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
+        Product product = productRepository.findByIdWithSeller(id)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PRODUCT_NOT_FOUND));
 
         if (!product.getSeller().getEmail().equals(email)) {
-            throw new IllegalArgumentException("본인 상품만 삭제할 수 있습니다.");
+            throw new BusinessException(ErrorCode.PRODUCT_NOT_OWNER);
         }
 
+        // 1. 채팅방의 메시지 먼저 삭제
+        List<com.jupjup.Backend.domain.chat.ChatRoom> chatRooms = chatRoomRepository.findAllByProductId(id);
+        for (com.jupjup.Backend.domain.chat.ChatRoom room : chatRooms) {
+            chatMessageRepository.deleteByChatRoomId(room.getId());
+        }
+        // 2. 채팅방 삭제
+        chatRoomRepository.deleteAll(chatRooms);
+
+        // 3. 주문 삭제
+        List<com.jupjup.Backend.domain.order.Order> orders = orderRepository.findAllByProductId(id);
+        orderRepository.deleteAll(orders);
+
+        // 4. 찜 삭제
+        wishRepository.deleteAllByProductId(id);
+
+        // 5. 신고 삭제
+        reportRepository.deleteAllByProductId(id);
+
+        // 6. 리뷰 삭제
+        reviewRepository.deleteAllByProductId(id);
+
+        // 7. 상품 삭제
         productRepository.delete(product);
     }
 
-    // 거래 상태 변경
     public ProductResponse updateStatus(Long id, ProductStatus status, String email) {
-        Product product = productRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
+        Product product = productRepository.findByIdWithSeller(id)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PRODUCT_NOT_FOUND));
 
         if (!product.getSeller().getEmail().equals(email)) {
-            throw new IllegalArgumentException("본인 상품만 상태를 변경할 수 있습니다.");
+            throw new BusinessException(ErrorCode.PRODUCT_NOT_OWNER);
         }
 
         product.updateStatus(status);
-        return ProductResponse.from(productRepository.save(product));
+        productRepository.save(product);
+
+        return productRepository.findByIdWithImages(id)
+                .map(ProductResponse::from)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PRODUCT_NOT_FOUND));
     }
 }

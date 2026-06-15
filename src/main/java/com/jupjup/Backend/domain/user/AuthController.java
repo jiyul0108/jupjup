@@ -1,11 +1,13 @@
 package com.jupjup.Backend.domain.user;
 
-import com.jupjup.Backend.domain.user.dto.AuthResponse;
-import com.jupjup.Backend.domain.user.dto.LoginRequest;
-import com.jupjup.Backend.domain.user.dto.SignupRequest;
+import com.jupjup.Backend.domain.product.dto.ProductResponse;
+import com.jupjup.Backend.domain.user.dto.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -14,17 +16,36 @@ public class AuthController {
 
     private final UserService userService;
 
-    // 회원가입
     @PostMapping("/signup")
     public ResponseEntity<String> signup(@RequestBody SignupRequest request) {
         userService.signup(request);
         return ResponseEntity.ok("회원가입이 완료되었습니다.");
     }
 
-    // 로그인
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@RequestBody LoginRequest request) {
-        AuthResponse response = userService.login(request);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(userService.login(request));
+    }
+
+    // 내 프로필 조회
+    @GetMapping("/me")
+    public ResponseEntity<UserProfileResponse> getProfile(
+            @AuthenticationPrincipal String email) {
+        return ResponseEntity.ok(userService.getProfile(email));
+    }
+
+    // 프로필 수정
+    @PutMapping("/me")
+    public ResponseEntity<UserProfileResponse> updateProfile(
+            @RequestBody UserUpdateRequest request,
+            @AuthenticationPrincipal String email) {
+        return ResponseEntity.ok(userService.updateProfile(email, request));
+    }
+
+    // 내 판매 상품 목록
+    @GetMapping("/me/products")
+    public ResponseEntity<List<ProductResponse>> getMyProducts(
+            @AuthenticationPrincipal String email) {
+        return ResponseEntity.ok(userService.getMyProducts(email));
     }
 }

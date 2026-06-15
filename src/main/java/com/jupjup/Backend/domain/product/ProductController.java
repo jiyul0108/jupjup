@@ -38,12 +38,14 @@ public class ProductController {
     // 상품 목록 조회
     @GetMapping
     public ResponseEntity<Page<ProductResponse>> getList(
-            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) List<String> categories,
             @RequestParam(required = false) Integer minPrice,
             @RequestParam(required = false) Integer maxPrice,
+            @RequestParam(required = false) ProductStatus status,
             @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC)
             Pageable pageable) {
-        return ResponseEntity.ok(productService.getList(category, minPrice, maxPrice, pageable));
+        return ResponseEntity.ok(productService.getList(keyword, categories, minPrice, maxPrice, status, pageable));
     }
     // 상품 상세 조회
     @GetMapping("/{id}")

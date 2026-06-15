@@ -44,4 +44,13 @@ public class User {
     public void updateJupjupScore(int delta) {
         this.jupjupScore += delta;
     }
+
+    public void updateProfile(String nickname, String location) {
+        if (nickname != null && !nickname.isBlank()) this.nickname = nickname;
+        if (location != null && !location.isBlank()) this.location = location;
+    }
+
+    public void updatePassword(String encodedPassword) {
+        this.password = encodedPassword;
+    }
 }

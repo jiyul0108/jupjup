@@ -1,0 +1,30 @@
+spring.application.name=
+
+# Server
+server.port=8080
+
+# Database
+spring.datasource.url=jdbc:mysql://localhost:3306/jupjup?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+spring.datasource.username=root
+spring.datasource.password=YOUR_DB_PASSWORD
+spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
+
+# JPA
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.format_sql=true
+
+# JWT
+jwt.secret=YOUR_JWT_SECRET_KEY_HERE
+jwt.expiration=86400000
+
+# 이미지 업로드
+file.upload-dir=uploads
+
+spring.jpa.open-in-view=false
+
+# Gemini AI
+gemini.api.key=YOUR_GEMINI_API_KEY
+
+logging.level.com.jupjup=DEBUG
+logging.level.org.springframework.web=DEBUG

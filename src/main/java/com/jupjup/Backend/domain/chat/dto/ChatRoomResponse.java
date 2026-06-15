@@ -13,6 +13,7 @@ public class ChatRoomResponse {
     private final String productTitle;
     private final String buyerNickname;
     private final String sellerNickname;
+    private final int unreadCount;
     private final LocalDateTime createdAt;
 
     public ChatRoomResponse(ChatRoom chatRoom) {
@@ -21,6 +22,17 @@ public class ChatRoomResponse {
         this.productTitle = chatRoom.getProduct().getTitle();
         this.buyerNickname = chatRoom.getBuyer().getNickname();
         this.sellerNickname = chatRoom.getSeller().getNickname();
+        this.unreadCount = 0;
+        this.createdAt = chatRoom.getCreatedAt();
+    }
+
+    public ChatRoomResponse(ChatRoom chatRoom, int unreadCount) {
+        this.id = chatRoom.getId();
+        this.productId = chatRoom.getProduct().getId();
+        this.productTitle = chatRoom.getProduct().getTitle();
+        this.buyerNickname = chatRoom.getBuyer().getNickname();
+        this.sellerNickname = chatRoom.getSeller().getNickname();
+        this.unreadCount = unreadCount;
         this.createdAt = chatRoom.getCreatedAt();
     }
 }

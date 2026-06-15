@@ -8,6 +8,8 @@ import com.jupjup.Backend.domain.product.Product;
 import com.jupjup.Backend.domain.product.ProductRepository;
 import com.jupjup.Backend.domain.user.User;
 import com.jupjup.Backend.domain.user.UserRepository;
+import com.jupjup.Backend.global.exception.BusinessException;
+import com.jupjup.Backend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,21 +25,18 @@ public class ChatService {
     private final ProductRepository productRepository;
     private final UserRepository userRepository;
 
-    // 채팅방 생성 (이미 존재하면 기존 채팅방 반환)
     @Transactional
     public ChatRoomResponse createRoom(ChatRoomCreateRequest request, String email) {
         User buyer = userRepository.findByEmail(email)
-                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
         Product product = productRepository.findById(request.getProductId())
-                .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
+                .orElseThrow(() -> new BusinessException(ErrorCode.PRODUCT_NOT_FOUND));
 
-        // 판매자 본인과는 채팅 불가
         if (product.getSeller().getId().equals(buyer.getId())) {
-            throw new IllegalArgumentException("본인 상품에는 채팅을 걸 수 없습니다.");
+            throw new BusinessException(ErrorCode.CHAT_SELF_NOT_ALLOWED);
         }
 
-        // 이미 채팅방이 존재하면 기존 방 반환
         return chatRoomRepository
                 .findByProductIdAndBuyerId(product.getId(), buyer.getId())
                 .map(ChatRoomResponse::new)
@@ -51,30 +50,36 @@ public class ChatService {
                 });
     }
 
-    // 내 채팅방 목록 조회
     public List<ChatRoomResponse> getMyRooms(String email) {
         User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
         return chatRoomRepository.findAllByUserId(user.getId())
                 .stream()
-                .map(ChatRoomResponse::new)
+                .map(room -> {
+                    int unread = chatMessageRepository.findUnreadMessages(room.getId(), user.getId()).size();
+                    return new ChatRoomResponse(room, unread);
+                })
                 .toList();
     }
 
-    // 채팅방 이전 메시지 조회
+    @Transactional
     public List<ChatMessageResponse> getMessages(Long roomId, String email) {
         User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
         ChatRoom room = chatRoomRepository.findById(roomId)
-                .orElseThrow(() -> new IllegalArgumentException("채팅방을 찾을 수 없습니다."));
+                .orElseThrow(() -> new BusinessException(ErrorCode.CHAT_ROOM_NOT_FOUND));
 
-        // 채팅방 참여자 확인
         if (!room.getBuyer().getId().equals(user.getId()) &&
                 !room.getSeller().getId().equals(user.getId())) {
-            throw new IllegalArgumentException("채팅방에 접근할 권한이 없습니다.");
+            throw new BusinessException(ErrorCode.CHAT_ROOM_ACCESS_DENIED);
         }
+
+        // 입장 시 안읽은 메시지 읽음 처리
+        List<ChatMessage> unread = chatMessageRepository.findUnreadMessages(roomId, user.getId());
+        unread.forEach(ChatMessage::markAsRead);
+        chatMessageRepository.saveAll(unread);
 
         return chatMessageRepository.findByChatRoomIdOrderBySentAtAsc(roomId)
                 .stream()
@@ -82,19 +87,23 @@ public class ChatService {
                 .toList();
     }
 
-    // 메시지 저장 (STOMP 핸들러에서 호출)
+    public long getTotalUnread(String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+        return chatMessageRepository.countTotalUnread(user.getId());
+    }
+
     @Transactional
     public ChatMessageResponse saveMessage(Long roomId, ChatMessageRequest request, String email) {
         User sender = userRepository.findByEmail(email)
-                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
         ChatRoom room = chatRoomRepository.findById(roomId)
-                .orElseThrow(() -> new IllegalArgumentException("채팅방을 찾을 수 없습니다."));
+                .orElseThrow(() -> new BusinessException(ErrorCode.CHAT_ROOM_NOT_FOUND));
 
-        // 채팅방 참여자 확인
         if (!room.getBuyer().getId().equals(sender.getId()) &&
                 !room.getSeller().getId().equals(sender.getId())) {
-            throw new IllegalArgumentException("채팅방에 접근할 권한이 없습니다.");
+            throw new BusinessException(ErrorCode.CHAT_ROOM_ACCESS_DENIED);
         }
 
         ChatMessage message = ChatMessage.builder()

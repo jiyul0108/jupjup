@@ -9,10 +9,11 @@ import java.util.Optional;
 
 public interface ChatRoomRepository extends JpaRepository<ChatRoom, Long> {
 
-    // 특정 상품에 대해 구매자가 이미 생성한 채팅방이 있는지 확인
-    Optional<ChatRoom> findByProductIdAndBuyerId(Long productId, Long buyerId);
+    @Query("SELECT r FROM ChatRoom r JOIN FETCH r.buyer JOIN FETCH r.seller JOIN FETCH r.product WHERE r.product.id = :productId AND r.buyer.id = :buyerId")
+    Optional<ChatRoom> findByProductIdAndBuyerId(@Param("productId") Long productId, @Param("buyerId") Long buyerId);
 
-    // 내가 참여한 채팅방 목록 (구매자 또는 판매자)
-    @Query("SELECT r FROM ChatRoom r WHERE r.buyer.id = :userId OR r.seller.id = :userId ORDER BY r.createdAt DESC")
+    @Query("SELECT r FROM ChatRoom r JOIN FETCH r.buyer JOIN FETCH r.seller JOIN FETCH r.product WHERE r.buyer.id = :userId OR r.seller.id = :userId ORDER BY r.createdAt DESC")
     List<ChatRoom> findAllByUserId(@Param("userId") Long userId);
+
+    List<ChatRoom> findAllByProductId(Long productId);
 }

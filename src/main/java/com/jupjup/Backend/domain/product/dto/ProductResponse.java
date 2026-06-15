@@ -13,12 +13,14 @@ import java.util.stream.Collectors;
 public class ProductResponse {
     private Long id;
     private String title;
+    private String description;
     private int price;
     private String category;
     private String location;
     private String status;
     private int viewCount;
     private String sellerNickname;
+    private int sellerScore;
     private LocalDateTime createdAt;
     private List<String> imageUrls;
 
@@ -30,12 +32,14 @@ public class ProductResponse {
         return new ProductResponse(
                 product.getId(),
                 product.getTitle(),
+                product.getDescription(),
                 product.getPrice(),
                 product.getCategory(),
                 product.getLocation(),
                 product.getStatus().name(),
                 product.getViewCount(),
                 product.getSeller().getNickname(),
+                product.getSeller().getJupjupScore(),
                 product.getCreatedAt(),
                 imageUrls
         );

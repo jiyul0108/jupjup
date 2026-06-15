@@ -40,4 +40,11 @@ public class ChatController {
             @AuthenticationPrincipal String email) {
         return ResponseEntity.ok(chatService.getMessages(roomId, email));
     }
+
+    // 전체 안읽은 메시지 수
+    @GetMapping("/unread")
+    public ResponseEntity<Long> getTotalUnread(
+            @AuthenticationPrincipal String email) {
+        return ResponseEntity.ok(chatService.getTotalUnread(email));
+    }
 }

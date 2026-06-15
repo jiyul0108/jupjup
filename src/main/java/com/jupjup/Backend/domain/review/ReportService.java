@@ -6,6 +6,8 @@ import com.jupjup.Backend.domain.review.dto.ReportCreateRequest;
 import com.jupjup.Backend.domain.review.dto.ReportResponse;
 import com.jupjup.Backend.domain.user.User;
 import com.jupjup.Backend.domain.user.UserRepository;
+import com.jupjup.Backend.global.exception.BusinessException;
+import com.jupjup.Backend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,23 +20,20 @@ public class ReportService {
     private final UserRepository userRepository;
     private final ProductRepository productRepository;
 
-    // 신고 접수
     @Transactional
     public ReportResponse create(ReportCreateRequest request, String email) {
         User reporter = userRepository.findByEmail(email)
-                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
         Product product = productRepository.findById(request.getProductId())
-                .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
+                .orElseThrow(() -> new BusinessException(ErrorCode.PRODUCT_NOT_FOUND));
 
-        // 본인 상품 신고 불가
         if (product.getSeller().getId().equals(reporter.getId())) {
-            throw new IllegalArgumentException("본인 상품은 신고할 수 없습니다.");
+            throw new BusinessException(ErrorCode.REPORT_SELF_NOT_ALLOWED);
         }
 
-        // 중복 신고 방지
         reportRepository.findByReporterIdAndProductId(reporter.getId(), product.getId())
-                .ifPresent(r -> { throw new IllegalArgumentException("이미 신고한 상품입니다."); });
+                .ifPresent(r -> { throw new BusinessException(ErrorCode.REPORT_ALREADY_EXISTS); });
 
         Report report = Report.builder()
                 .reporter(reporter)

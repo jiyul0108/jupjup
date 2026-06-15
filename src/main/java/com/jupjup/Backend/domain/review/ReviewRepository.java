@@ -12,4 +12,6 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
 
     // 같은 상품에 대해 이미 리뷰를 작성했는지 확인 (중복 방지)
     Optional<Review> findByReviewerIdAndProductId(Long reviewerId, Long productId);
+
+    void deleteAllByProductId(Long productId);
 }

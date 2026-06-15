@@ -64,6 +64,10 @@ public class Product {
         this.status = status;
     }
 
+    public void increaseViewCount() {
+        this.viewCount++;
+    }
+
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     @Builder.Default
     private List<ProductImage> images = new ArrayList<>();

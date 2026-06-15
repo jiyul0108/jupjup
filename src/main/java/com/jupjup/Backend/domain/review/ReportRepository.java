@@ -8,4 +8,6 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 
     // 같은 상품에 대해 이미 신고했는지 확인 (중복 방지)
     Optional<Report> findByReporterIdAndProductId(Long reporterId, Long productId);
+
+    void deleteAllByProductId(Long productId);
 }
