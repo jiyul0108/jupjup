@@ -1,43 +1,38 @@
 package com.jupjup.Backend.domain.product;
 
+import com.cloudinary.Cloudinary;
+import com.cloudinary.utils.ObjectUtils;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
 public class ImageService {
 
-    @Value("${file.upload-dir}")
-    private String uploadDir;
-
+    private final Cloudinary cloudinary;
     private final ProductImageRepository productImageRepository;
 
     public List<String> uploadImages(Product product, List<MultipartFile> files) throws IOException {
-        // 절대 경로로 업로드 폴더 생성
-        String absoluteUploadDir = System.getProperty("user.dir") + "/" + uploadDir;
-        File dir = new File(absoluteUploadDir);
-        if (!dir.exists()) {
-            dir.mkdirs();
-        }
-
         List<String> imageUrls = new ArrayList<>();
 
         for (MultipartFile file : files) {
-            String fileName = UUID.randomUUID() + "_" + file.getOriginalFilename();
-            File dest = new File(absoluteUploadDir + "/" + fileName);
-            file.transferTo(dest);
+            // Cloudinary에 업로드
+            Map uploadResult = cloudinary.uploader().upload(file.getBytes(),
+                    ObjectUtils.asMap(
+                            "folder", "jupjup",
+                            "resource_type", "image"
+                    ));
 
-            String imageUrl = "/uploads/" + fileName;
+            String imageUrl = (String) uploadResult.get("secure_url");
             imageUrls.add(imageUrl);
 
+            // DB에 저장
             ProductImage productImage = ProductImage.builder()
                     .product(product)
                     .imageUrl(imageUrl)
