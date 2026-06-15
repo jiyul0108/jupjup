@@ -44,3 +44,8 @@ dependencies {
 tasks.named('test') {
 	useJUnitPlatform()
 }
+
+// plain jar 생성 비활성화 (Railway 배포용)
+jar {
+	enabled = false
+}
